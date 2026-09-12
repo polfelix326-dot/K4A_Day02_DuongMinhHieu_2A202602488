@@ -111,28 +111,34 @@ Quick gut:
 [ ] Chưa biết
 ```
 
-**Draft workflow Card #1** (ASCII / Mermaid / ảnh đính kèm):
+**Draft workflow Card #1** (Mermaid Diagram):
 
-```text
-CURRENT STATE — ~45 giây/chu kỳ cảnh báo
+#### Current State Workflow:
+```mermaid
+flowchart TD
+    subgraph CURRENT_STATE["CURRENT STATE: Chu kỳ cảnh báo ~45 giây (Báo động giả 45%)"]
+        A1["1. Đọc luồng RTSP đa luồng (30ms)"] --> A2["2. Model YOLO Detect Bounding Box (40ms)"]
+        A2 --> A3["3. BBox chạm vạch ROI vùng cấm (5ms)<br/>🚨 BOTTLENECK: Phán đoán 1 frame tức thời, nhạy quá mức"]
+        A3 --> A4["4. WebSocket bắn Event & Popup chuông lên Web (200ms)"]
+        A4 --> A5["5. Bảo vệ nhìn màn hình xác minh mắt thường (15-30s)"]
+        A5 --> A6["6. Bảo vệ click tắt chuông báo giả (5-10s)"]
+    end
+```
 
-[1. Multi-thread nhận frame: 30ms] 
-→ [2. Model YOLO detect: 40ms] 
-→ [3. Bounding box chạm ROI: 5ms]  <-- bottleneck (nhạy quá mức, 1 frame là bắn alert)
-→ [4. WebSocket đẩy chuông & popup lên Web: 200ms] 
-→ [5. Bảo vệ nhìn màn hình xác minh mắt thường: 15-30s] 
-→ [6. Bảo vệ click bấm tắt báo giả: 5-10s]
-
-FUTURE STATE — ~2 giây (tự động hóa) + 5 giây xác thực khi có biến thật
-
-[1. Multi-thread nhận frame: 30ms] 
-→ [2. Model YOLO detect & Track ID: 40ms] 
-→ [3. Rule kiểm tra: Object tồn tại trong ROI >= 15 frames: 500ms]
-→ [4. AI/Heuristic xác nhận quỹ đạo chuyển động thực (loại bóng đổ/lá cây): 100ms]
-→ [5. Phân loại mức độ nguy cơ: Cao / Trung bình / Báo giả tự lọc: 50ms]
-→ [6. Đẩy alert nguy cơ cao lên Web, nhân viên chỉ duyệt hành động ứng phó: 5s]  <-- human boundary
-
-Fallback: nếu AI/Rule phân vân (độ tin cậy nằm trong vùng nghi vấn 50-70%), đẩy vào danh sách "Sự kiện cần lưu ý" không reo chuông báo động khẩn cấp, để nhân viên rà soát lại khi rảnh.
+#### Future State Workflow:
+```mermaid
+flowchart TD
+    subgraph FUTURE_STATE["FUTURE STATE: ~2 giây tự động + 5 giây duyệt biến thật (Báo giả <10%)"]
+        B1["1. Đọc luồng RTSP đa luồng (30ms)"] --> B2["2. YOLO Detect & Gán Track ID (40ms)"]
+        B2 --> B3["3. Rule Dwell Time: Tồn tại trong ROI >= 15 frames (500ms)<br/>✅ Lọc 80% đèn xe quét qua, lá cây lay"]
+        B3 --> B4{"4. Phân tích Vector chuyển động tịnh tiến?"}
+        B4 -- "Không (Dao động tại chỗ / Nhiễu)" --> B_DROP["Tự động triệt tiêu cảnh báo giả (50ms)"]
+        B4 -- "Có (Chuyển động xâm nhập thật)" --> B5["5. Phân loại mức độ nguy cơ: CAO"]
+        B5 --> B6["6. Bắn Alert kèm video clip 5s lên Web"]
+        B6 --> B7["7. Bảo vệ xác nhận & kích hoạt đội phản ứng nhanh (5s)<br/>🛡️ HUMAN BOUNDARY"]
+        
+        B3 -. "Nghi vấn (Confidence 50-70%)" .-> FB["FALLBACK: Đẩy vào Tab 'Sự kiện lưu ý' để review sau, không hú còi"]
+    end
 ```
 
 File đính kèm (nếu vẽ riêng): `01-individual-problem-scan-workflow-card-1.png`
@@ -185,24 +191,39 @@ Quick gut:
 [ ] Chưa biết
 ```
 
-**Draft workflow Card #2:**
+**Draft workflow Card #2** (Mermaid Diagram):
 
-```text
-CURRENT STATE — Độ lệch 300-800ms
+#### Current State Workflow:
+```mermaid
+flowchart TD
+    subgraph CURRENT_STATE["CURRENT STATE: Lệch đồng bộ 300ms - 800ms (BBox chạy trước Video)"]
+        C0["Frame Camera (gán Timestamp T0)"] --> C_VID["Nhánh Video: Encode H264 (25ms)"]
+        C_VID --> C_NMS["Đẩy RTMP lên Node Media Server (50ms)"]
+        C_NMS --> C_PLAY["Web Player giải mã & đệm buffer chống giật<br/>🚨 BOTTLENECK: Video hiển thị lúc T0 + 600ms"]
+        
+        C0 --> C_WS["Nhánh AI: YOLO Infer BBox (35ms)"]
+        C_WS --> C_SOCK["Bắn JSON qua WebSocket (15ms)"]
+        C_SOCK --> C_CANVAS["Canvas Web vẽ BBox ngay lúc T0 + 50ms"]
+        
+        C_CANVAS -. "Chênh lệch ~550ms" .-> C_MISMATCH["KẾT QUẢ: Khung BBox đi trước đón đầu, người chạy sau!"]
+    end
+```
 
-[1. Capture frame (T0)] 
-→ Nhánh A: [Encode & Stream lên Node Media Server: trễ buffer ~600ms] → [Web Player Video: T0 + 600ms]  <-- bottleneck
-→ Nhánh B: [Inference & Bắn WebSocket JSON: trễ ~80ms] → [Canvas vẽ ngay: T0 + 80ms]
-==> Kết quả: Canvas vẽ Bounding box chạy trước Video 520ms.
-
-FUTURE STATE — Độ lệch <80ms (Đồng bộ qua Time-buffer Queue)
-
-[1. Capture frame & nhúng Frame_ID / Timestamp T0]
-→ Nhánh A: Stream video lên Web Player
-→ Nhánh B: Bắn WebSocket JSON chứa Frame_ID / T0 vào Hàng đợi (Client Ring Buffer)
-→ [Frontend Client Hook: Đọc video current PTS] → [Lấy đúng Bounding Box có Timestamp khớp để vẽ Canvas]  <-- human boundary / deterministic rule
-
-Fallback: Nếu network lag làm mất gói WebSocket của frame đó, tự động nội suy vị trí bbox từ frame liền trước hoặc ẩn bbox sau 200ms để tránh treo khung rác trên màn hình.
+#### Future State Workflow:
+```mermaid
+flowchart TD
+    subgraph FUTURE_STATE["FUTURE STATE: Đồng bộ chính xác <80ms (Client Ring Buffer)"]
+        D0["Frame Camera (nhúng Frame_ID & Timestamp T0)"]
+        D0 --> D_VID["Nhánh Video: Stream lên Web Player"]
+        D0 --> D_WS["Nhánh AI: Bắn WebSocket JSON kèm Timestamp T0"]
+        
+        D_WS --> D_QUEUE["Frontend Ring Buffer Queue (Lưu trữ BBox tạm thời)"]
+        D_VID --> D_HOOK["Frontend Playback Hook: Đọc Timestamp hiện tại của thẻ Video (PTS)"]
+        
+        D_HOOK --> D_MATCH{"Lấy BBox có T0 khớp với Video PTS hiện tại"}
+        D_MATCH -- "Khớp nhịp thời gian" --> D_DRAW["Vẽ BBox khớp khít theo đối tượng trên Video<br/>🛡️ DETERMINISTIC RULE (<80ms)"]
+        D_MATCH -- "Mất gói mạng WebSocket" --> D_FALLBACK["FALLBACK: Nội suy vị trí từ frame trước hoặc ẩn BBox sau 200ms"]
+    end
 ```
 
 File đính kèm: `01-individual-problem-scan-workflow-card-2.png`
@@ -255,25 +276,29 @@ Quick gut:
 [ ] Chưa biết
 ```
 
-**Draft workflow Card #3:**
+**Draft workflow Card #3** (Mermaid Diagram):
 
-```text
-CURRENT STATE — 240 phút/tuần
+#### Current State Workflow:
+```mermaid
+flowchart TD
+    subgraph CURRENT_STATE["CURRENT STATE: 240 phút/tuần (Tua video thủ công)"]
+        E1["1. Tải file video MP4 thô từ camera server (30')"] --> E2["2. CV Intern mở video tua x4/x8 tìm đoạn lỗi bằng mắt (150')<br/>🚨 BOTTLENECK: Mỏi mắt, dễ bỏ sót lỗi"]
+        E2 --> E3["3. Cắt clip 10-15s chứa lỗi bằng FFmpeg thủ công (30')"]
+        E3 --> E4["4. Import từng clip vào phần mềm CVAT (15')"]
+        E4 --> E5["5. Bắt đầu gán nhãn lại từng frame từ đầu (15')"]
+    end
+```
 
-[1. Tải video thô từ server: 30'] 
-→ [2. Ngồi tua x4/x8 tìm đoạn lỗi bằng mắt: 150']  <-- bottleneck
-→ [3. Cắt clip bằng FFmpeg thủ công: 30'] 
-→ [4. Import vào CVAT: 15'] 
-→ [5. Bắt đầu gán nhãn: 15']
-
-FUTURE STATE — 35 phút/tuần
-
-[1. Script tự động quét log metadata & lọc clip nghi vấn (confidence 0.25 - 0.45): 5']
-→ [2. Offline Model đối soát tự động đánh dấu đoạn miss/false detection: 10' (chạy nền)]
-→ [3. Tự động cắt clip 10s và đẩy sẵn draft annotations vào CVAT: 5']
-→ [4. CV Engineer mở CVAT duyệt/sửa nhãn nhanh (Human-in-the-loop): 15']  <-- human boundary
-
-Fallback: Nếu script lọc bỏ sót, định kỳ lấy mẫu ngẫu nhiên (random sampling) 5% thời lượng video để người kiểm tra xác suất.
+#### Future State Workflow:
+```mermaid
+flowchart TD
+    subgraph FUTURE_STATE["FUTURE STATE: 35 phút/tuần (DataOps Workflow tự động)"]
+        F1["1. Script quét log metadata & lọc clip nghi vấn (confidence 0.25 - 0.45): 5'"] --> F2["2. Offline Model chạy nền đối soát, đánh dấu đoạn miss/false alert: 10'"]
+        F2 --> F3["3. Tự động cắt clip 10s & import kèm draft bbox vào CVAT: 5'"]
+        F3 --> F4["4. CV Engineer mở CVAT duyệt và tinh chỉnh nhãn nhanh (15')<br/>🛡️ HUMAN BOUNDARY"]
+        
+        F1 -. "Kiểm tra định kỳ" .-> F_FALLBACK["FALLBACK: Lấy mẫu ngẫu nhiên (Random 5%) video kiểm tra để tránh lệch phân phối dữ liệu"]
+    end
 ```
 
 File đính kèm: `01-individual-problem-scan-workflow-card-3.png`
